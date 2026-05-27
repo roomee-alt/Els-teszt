@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>3D Lakás – Körbejárható</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#111; overflow:hidden; height:100vh; }
+    #c { position:fixed; inset:0; }
+    #overlay {
+      position:fixed; inset:0; z-index:200; background:#111;
+      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
+    }
+    #overlay.hidden { display:none; }
+    .spinner { width:44px; height:44px; border:3px solid rgba(255,255,255,.1); border-top-color:#4ade80; border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to{transform:rotate(360deg);} }
+    #msg { color:#888; font-size:14px; font-family:system-ui; }
+    #ui {
+      position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+      z-index:100; display:flex; gap:6px;
+      background:rgba(0,0,0,.75); border:1px solid rgba(255,255,255,.1);
+      border-radius:30px; padding:8px 14px; backdrop-filter:blur(10px);
+    }
+    .btn {
+      cursor:pointer; border:none; border-radius:20px; font-size:12px;
+      font-weight:600; padding:7px 13px; color:#aaa; background:rgba(255,255,255,.07);
+      font-family:system-ui; transition:all .15s;
+    }
+    .btn:hover { background:rgba(255,255,255,.15); color:#fff; }
+    .btn.on { background:#4ade80; color:#000; }
+    #hint {
+      position:fixed; bottom:68px; left:50%; transform:translateX(-50%);
+      z-index:100; display:none; white-space:nowrap;
+      background:rgba(0,0,0,.75); border-radius:8px; padding:8px 14px;
+      font-size:11px; color:#777; font-family:system-ui; line-height:1.9;
+    }
+    #hint b { color:#bbb; }
+    #cross {
+      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+      z-index:100; display:none; pointer-events:none;
+    }
+    #cross::before,#cross::after{content:'';position:absolute;background:rgba(255,255,255,.8);border-radius:1px;}
+    #cross::before{width:2px;height:20px;top:-10px;left:-1px;}
+    #cross::after{width:20px;height:2px;top:-1px;left:-10px;}
+  </style>
+</head>
+<body>
+<div id="overlay">
+  <div class="spinner"></div>
+  <div id="msg">Modell betöltése...</div>
+</div>
+<div id="c"></div>
+<div id="cross"></div>
+<div id="hint">
+  <b>W/S</b> Előre/Hátra &nbsp;|&nbsp; <b>A/D</b> Oldalra &nbsp;|&nbsp;
+  <b>Q/E</b> Le/Fel &nbsp;|&nbsp; <b>Egér húzás</b> Nézés &nbsp;|&nbsp; <b>ESC</b> Kilépés
+</div>
+<div id="ui">
+  <button class="btn on" id="bo" onclick="orbit()">🔄 Forgatás</button>
+  <button class="btn"    id="bw" onclick="walk()">🚶 Séta</button>
+  <button class="btn"         onclick="top()">⬆ Felülnézet</button>
+  <button class="btn"         onclick="reset()">↺ Reset</button>
+</div>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script>
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+document.getElementById('c').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2d2d3a);
+scene.add(new THREE.AmbientLight(0xffffff,0.7));
+const sun=new THREE.DirectionalLight(0xfffaf0,0.5);
+sun.position.set(4,8,4); scene.add(sun);
+
+const cam=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,1000);
+cam.position.set(0,2,5);
+
+const oc=new THREE.OrbitControls(cam,renderer.domElement);
+oc.enableDamping=true; oc.dampingFactor=0.08;
+
+window.addEventListener('resize',()=>{
+  cam.aspect=innerWidth/innerHeight;
+  cam.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+let wm=false,yaw=0,pitch=0,drag=false,lx=0,ly=0;
+const keys={};
+const SPD=0.06;
+let box=new THREE.Box3();
+
+document.addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(e.code==='Escape'&&wm) orbit();
+  if(wm&&['KeyW','KeyS','KeyA','KeyD','KeyQ','KeyE','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))
+    e.preventDefault();
+});
+document.addEventListener('keyup',e=>{keys[e.code]=false;});
+
+renderer.domElement.addEventListener('mousedown',e=>{if(wm){drag=true;lx=e.clientX;ly=e.clientY;}});
+document.addEventListener('mouseup',()=>drag=false);
+document.addEventListener('mousemove',e=>{
+  if(!wm||!drag)return;
+  yaw-=(e.clientX-lx)*0.004;
+  pitch=Math.max(-1.3,Math.min(1.3,pitch-(e.clientY-ly)*0.004));
+  lx=e.clientX;ly=e.clientY;
+});
+renderer.domElement.addEventListener('touchstart',e=>{if(wm){drag=true;lx=e.touches[0].clientX;ly=e.touches[0].clientY;}});
+document.addEventListener('touchend',()=>drag=false);
+document.addEventListener('touchmove',e=>{
+  if(!wm||!drag)return;
+  yaw-=(e.touches[0].clientX-lx)*0.004;
+  pitch=Math.max(-1.3,Math.min(1.3,pitch-(e.touches[0].clientY-ly)*0.004));
+  lx=e.touches[0].clientX;ly=e.touches[0].clientY;
+  e.preventDefault();
+},{passive:false});
+
+function orbit(){
+  wm=false;oc.enabled=true;drag=false;
+  document.getElementById('cross').style.display='none';
+  document.getElementById('hint').style.display='none';
+  document.getElementById('bo').classList.add('on');
+  document.getElementById('bw').classList.remove('on');
+}
+function walk(){
+  wm=true;oc.enabled=false;
+  const c=new THREE.Vector3();box.getCenter(c);
+  cam.position.set(c.x,box.min.y+1.6,c.z);
+  cam.rotation.set(0,0,0,'YXZ');
+  yaw=0;pitch=0;drag=false;
+  document.getElementById('cross').style.display='block';
+  document.getElementById('hint').style.display='block';
+  document.getElementById('bw').classList.add('on');
+  document.getElementById('bo').classList.remove('on');
+}
+function top(){
+  orbit();
+  const sz=new THREE.Vector3();box.getSize(sz);
+  const c=new THREE.Vector3();box.getCenter(c);
+  cam.position.set(c.x,c.y+Math.max(sz.x,sz.z)*1.2,c.z);
+  cam.up.set(0,0,-1);oc.target.copy(c);oc.update();
+}
+function reset(){
+  orbit();
+  const sz=new THREE.Vector3();box.getSize(sz);
+  const c=new THREE.Vector3();box.getCenter(c);
+  cam.position.set(c.x,c.y+sz.y*0.4,c.z+Math.max(sz.x,sz.z)*0.9);
+  cam.up.set(0,1,0);oc.target.copy(c);oc.update();
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  if(wm){
+    cam.rotation.order='YXZ';
+    cam.rotation.y=yaw;cam.rotation.x=pitch;
+    const fwd=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+    const rgt=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+    const up=new THREE.Vector3(0,1,0);
+    if(keys['KeyW']||keys['ArrowUp'])    cam.position.addScaledVector(fwd,SPD);
+    if(keys['KeyS']||keys['ArrowDown'])  cam.position.addScaledVector(fwd,-SPD);
+    if(keys['KeyA']||keys['ArrowLeft'])  cam.position.addScaledVector(rgt,-SPD);
+    if(keys['KeyD']||keys['ArrowRight']) cam.position.addScaledVector(rgt,SPD);
+    if(keys['KeyQ']) cam.position.addScaledVector(up,-SPD);
+    if(keys['KeyE']) cam.position.addScaledVector(up,SPD);
+  } else { oc.update(); }
+  renderer.render(scene,cam);
+}
+animate();
+
+new THREE.GLTFLoader().load('model.glb',
+  gltf=>{
+    scene.add(gltf.scene);
+    box.setFromObject(gltf.scene);
+    reset();
+    document.getElementById('overlay').classList.add('hidden');
+  },
+  xhr=>{ if(xhr.total) document.getElementById('msg').textContent='Betöltés: '+Math.round(xhr.loaded/xhr.total*100)+'%'; },
+  err=>{ document.getElementById('msg').textContent='Hiba: '+(err.message||'nem töltődött be'); }
+);
+</script>
+</body>
+</html>
