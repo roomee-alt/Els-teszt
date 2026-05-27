@@ -97,6 +97,7 @@
   <label>.PLY FÁJL URL-JE (GitHub raw stb.)</label>
   <div style="display:flex;gap:8px;margin-bottom:10px">
     <input type="text" id="url-input" placeholder="https://raw.githubusercontent.com/.../*.ply"
+      value="./2026.%2005.%2027.ply"
       style="flex:1;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e0e0e0;font-size:12px;padding:8px 10px;outline:none"/>
     <button id="url-load-btn" style="background:#4ade80;color:#0d1a0d;border-radius:8px;font-size:12px;font-weight:700;padding:8px 12px;border:none;cursor:pointer">▶</button>
   </div>
@@ -398,6 +399,10 @@
   document.getElementById('url-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') loadFromUrl(document.getElementById('url-input').value.trim());
   });
+
+  // ── Auto-load on page open ──────────────────────────────────────
+  const autoUrl = document.getElementById('url-input').value.trim();
+  if (autoUrl) loadFromUrl(autoUrl);
 
   // ── File input / drag-drop ──────────────────────────────────────
   document.getElementById('file-input').addEventListener('change', e => {
