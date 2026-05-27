@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>3D Lakás – Körbejárható</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#111; color:#eee; font-family:'Segoe UI',system-ui,sans-serif; overflow:hidden; height:100vh; }
+    #canvas-container { position:fixed; inset:0; z-index:0; }
+
+    /* Loading overlay */
+    #overlay {
+      position:fixed; inset:0; z-index:200; background:#111;
+      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px;
+    }
+    #overlay.hidden { display:none; }
+    .logo { font-size:28px; font-weight:700; color:#fff; letter-spacing:-.5px; }
+    .logo span { color:#4ade80; }
+    .spinner { width:44px; height:44px; border:3px solid rgba(255,255,255,.1); border-top-color:#4ade80; border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to{transform:rotate(360deg);} }
+    #load-msg { color:#888; font-size:14px; }
+    #err-msg { display:none; color:#f87171; font-size:13px; text-align:center; max-width:320px; line-height:1.7; }
+
+    /* UI panel */
+    #ui {
+      position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+      z-index:100; display:flex; gap:8px; align-items:center;
+      background:rgba(15,15,20,.92); border:1px solid rgba(255,255,255,.1);
+      border-radius:40px; padding:10px 18px;
+      backdrop-filter:blur(12px); box-shadow:0 4px 24px rgba(0,0,0,.5);
+      white-space:nowrap;
+    }
+
+    .ui-btn {
+      cursor:pointer; border:none; border-radius:20px;
+      font-size:12px; font-weight:600; padding:7px 14px;
+      transition:all .15s; color:#ccc; background:rgba(255,255,255,.08);
+    }
+    .ui-btn:hover { background:rgba(255,255,255,.15); color:#fff; }
+    .ui-btn.active { background:#4ade80; color:#0d1a0d; }
+
+    .divider { width:1px; height:20px; background:rgba(255,255,255,.1); margin:0 4px; }
+
+    #mode-label {
+      font-size:11px; color:#888; padding:0 4px;
+    }
+
+    /* Walk mode crosshair */
+    #crosshair {
+      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+      z-index:100; display:none; pointer-events:none;
+    }
+    #crosshair::before, #crosshair::after {
+      content:''; position:absolute; background:rgba(255,255,255,.8);
+      border-radius:2px;
+    }
+    #crosshair::before { width:2px; height:16px; top:-8px; left:-1px; }
+    #crosshair::after  { width:16px; height:2px; top:-1px; left:-8px; }
+
+    /* Walk instructions */
+    #walk-hint {
+      position:fixed; top:24px; left:50%; transform:translateX(-50%);
+      z-index:100; display:none;
+      background:rgba(15,15,20,.9); border:1px solid rgba(255,255,255,.1);
+      border-radius:10px; padding:10px 18px; font-size:12px; color:#888;
+      backdrop-filter:blur(8px); text-align:center; line-height:1.8;
+    }
+    #walk-hint span { color:#ccc; }
+
+    /* Hint panel (orbit mode) */
+    #orbit-hint {
+      position:fixed; bottom:80px; right:24px; z-index:100;
+      background:rgba(15,15,20,.85); border:1px solid rgba(255,255,255,.08);
+      border-radius:10px; padding:10px 14px; font-size:11px; color:#555; line-height:1.9;
+    }
+    #orbit-hint span { color:#888; }
+  </style>
+</head>
+<body>
+
+<div id="overlay">
+  <div class="logo">3D <span>Lakás</span></div>
+  <div class="spinner" id="spinner"></div>
+  <div id="load-msg">Modell betöltése...</div>
+  <div id="err-msg"></div>
+</div>
+
+<div id="canvas-container"></div>
+<div id="crosshair"></div>
+
+<div id="walk-hint">
+  <span>W A S D</span> Mozgás &nbsp;|&nbsp; <span>Egér</span> Nézés &nbsp;|&nbsp; <span>ESC</span> Kilépés sétálós módból
+</div>
+
+<div id="ui">
+  <span id="mode-label">Nézet:</span>
+  <button class="ui-btn active" id="btn-orbit" onclick="setMode('orbit')">🔄 Forgatás</button>
+  <div class="divider"></div>
+  <button class="ui-btn" id="btn-walk" onclick="setMode('walk')">🚶 Séta</button>
+  <div class="divider"></div>
+  <button class="ui-btn" id="btn-top" onclick="topView()">⬆ Felülnézet</button>
+  <div class="divider"></div>
+  <button class="ui-btn" id="btn-reset" onclick="resetCamera()">↺ Reset</button>
+</div>
+
+<div id="orbit-hint">
+  <span>Bal gomb</span> Forgatás &nbsp;|&nbsp; <span>Jobb gomb</span> Mozgatás &nbsp;|&nbsp; <span>Scroll</span> Zoom
+</div>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+<script>
+const MODEL = 'model.glb';
+
+// ── Renderer ────────────────────────────────────────────────────
+const container = document.getElementById('canvas-container');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.shadowMap.enabled = true;
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x222222);
+
+// Lighting
+const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+scene.add(ambient);
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+dirLight.position.set(5, 10, 5);
+scene.add(dirLight);
+
+// Camera
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
+camera.position.set(0, 1.6, 3);
+
+// OrbitControls
+const orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+orbitControls.enableDamping = true;
+orbitControls.dampingFactor = 0.08;
+orbitControls.minDistance = 0.1;
+orbitControls.maxDistance = 50;
+orbitControls.target.set(0, 0, 0);
+
+// ── Walk mode ────────────────────────────────────────────────────
+const keys = {};
+let walkMode = false;
+let yaw = 0, pitch = 0;
+const walkSpeed = 0.04;
+
+document.addEventListener('keydown', e => { keys[e.code] = true; });
+document.addEventListener('keyup',   e => { keys[e.code] = false; });
+document.addEventListener('keydown', e => { if (e.code === 'Escape' && walkMode) exitWalk(); });
+
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement !== renderer.domElement && walkMode) exitWalk();
+});
+
+document.addEventListener('mousemove', e => {
+  if (!walkMode || document.pointerLockElement !== renderer.domElement) return;
+  yaw   -= e.movementX * 0.002;
+  pitch -= e.movementY * 0.002;
+  pitch = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, pitch));
+});
+
+renderer.domElement.addEventListener('click', () => {
+  if (walkMode) renderer.domElement.requestPointerLock();
+});
+
+function enterWalk() {
+  walkMode = true;
+  orbitControls.enabled = false;
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  yaw = Math.atan2(dir.x, dir.z);
+  pitch = Math.asin(dir.y);
+  renderer.domElement.requestPointerLock();
+  document.getElementById('crosshair').style.display = 'block';
+  document.getElementById('walk-hint').style.display = 'block';
+  document.getElementById('orbit-hint').style.display = 'none';
+  document.getElementById('btn-walk').classList.add('active');
+  document.getElementById('btn-orbit').classList.remove('active');
+}
+
+function exitWalk() {
+  walkMode = false;
+  orbitControls.enabled = true;
+  document.exitPointerLock();
+  document.getElementById('crosshair').style.display = 'none';
+  document.getElementById('walk-hint').style.display = 'none';
+  document.getElementById('orbit-hint').style.display = 'block';
+  document.getElementById('btn-orbit').classList.add('active');
+  document.getElementById('btn-walk').classList.remove('active');
+}
+
+function setMode(m) {
+  if (m === 'walk') enterWalk();
+  else exitWalk();
+}
+
+function updateWalk() {
+  if (!walkMode) return;
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+  const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+  const right   = new THREE.Vector3(Math.cos(yaw),  0, -Math.sin(yaw));
+  if (keys['KeyW'] || keys['ArrowUp'])    camera.position.addScaledVector(forward,  walkSpeed);
+  if (keys['KeyS'] || keys['ArrowDown'])  camera.position.addScaledVector(forward, -walkSpeed);
+  if (keys['KeyA'] || keys['ArrowLeft'])  camera.position.addScaledVector(right,   -walkSpeed);
+  if (keys['KeyD'] || keys['ArrowRight']) camera.position.addScaledVector(right,    walkSpeed);
+}
+
+// ── Camera helpers ───────────────────────────────────────────────
+let modelBox = new THREE.Box3();
+function topView() {
+  exitWalk();
+  const size = new THREE.Vector3(); modelBox.getSize(size);
+  const center = new THREE.Vector3(); modelBox.getCenter(center);
+  camera.position.set(center.x, center.y + Math.max(size.x,size.z)*1.2, center.z);
+  camera.up.set(0,0,-1);
+  orbitControls.target.copy(center);
+  orbitControls.update();
+}
+function resetCamera() {
+  exitWalk();
+  const size = new THREE.Vector3(); modelBox.getSize(size);
+  const center = new THREE.Vector3(); modelBox.getCenter(center);
+  camera.position.set(center.x, center.y + size.y*0.3, center.z + Math.max(size.x,size.z)*0.8);
+  camera.up.set(0,1,0);
+  orbitControls.target.copy(center);
+  orbitControls.update();
+}
+
+// ── Resize ───────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── Render loop ──────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  updateWalk();
+  if (!walkMode) orbitControls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ── Load model ───────────────────────────────────────────────────
+const loader = new THREE.GLTFLoader();
+loader.load(
+  MODEL,
+  gltf => {
+    scene.add(gltf.scene);
+    modelBox.setFromObject(gltf.scene);
+    resetCamera();
+    document.getElementById('overlay').classList.add('hidden');
+  },
+  xhr => {
+    if (xhr.total) {
+      const pct = Math.round(xhr.loaded / xhr.total * 100);
+      document.getElementById('load-msg').textContent = `Betöltés: ${pct}%`;
+    }
+  },
+  err => {
+    console.error(err);
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('load-msg').style.display = 'none';
+    const e = document.getElementById('err-msg');
+    e.style.display = 'block';
+    e.textContent = 'Hiba: ' + (err.message || 'A modell nem töltődött be.');
+  }
+);
+</script>
+</body>
+</html>
