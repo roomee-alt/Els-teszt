@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Gaussian Splat Viewer</title>
+
+  <!-- PlayCanvas Engine -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/playcanvas/2.3.0/playcanvas.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #13131a;
+      --border: #2a2a38;
+      --accent: #5fffb0;
+      --accent2: #a78bfa;
+      --text: #e8e8f0;
+      --muted: #6b6b80;
+      --danger: #ff5f7a;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      overflow: hidden;
+    }
+
+    #canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* ── UI Panel ── */
+    #ui {
+      position: fixed;
+      top: 20px; left: 20px;
+      z-index: 10;
+      width: min(380px, calc(100vw - 40px));
+      background: rgba(19,19,26,0.85);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      overflow: hidden;
+      box-shadow: 0 8px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(95,255,176,0.06);
+      transition: transform 0.3s ease;
+    }
+
+    #ui-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    #ui-header .title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .label-mono {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    #ui-header h1 {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: 0.01em;
+    }
+
+    #toggle-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      padding: 4px;
+      border-radius: 6px;
+      transition: color 0.2s, background 0.2s;
+    }
+    #toggle-btn:hover { color: var(--text); background: var(--border); }
+
+    #ui-body {
+      padding: 18px 20px 20px;
+    }
+
+    .field-group { margin-bottom: 14px; }
+
+    label {
+      display: block;
+      font-size: 11px;
+      font-family: 'Space Mono', monospace;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+
+    input[type="text"], input[type="range"] {
+      width: 100%;
+    }
+
+    input[type="text"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: 'Space Mono', monospace;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input[type="text"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(95,255,176,0.12);
+    }
+    input[type="text"]::placeholder { color: var(--muted); }
+
+    .row { display: flex; gap: 8px; }
+
+    button {
+      flex: 1;
+      padding: 10px 14px;
+      border: none;
+      border-radius: 8px;
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    #load-btn {
+      background: var(--accent);
+      color: #050a07;
+      font-weight: 700;
+    }
+    #load-btn:hover { background: #3de89a; box-shadow: 0 0 20px rgba(95,255,176,0.3); }
+    #load-btn:active { transform: scale(0.97); }
+
+    #reset-btn {
+      background: var(--surface);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      flex: 0 0 auto;
+      padding: 10px 14px;
+    }
+    #reset-btn:hover { color: var(--text); border-color: var(--muted); }
+
+    .separator {
+      height: 1px;
+      background: var(--border);
+      margin: 14px 0;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .slider-val {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--accent);
+      min-width: 32px;
+      text-align: right;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 6px rgba(95,255,176,0.4);
+    }
+
+    /* ── Status Bar ── */
+    #status-bar {
+      position: fixed;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      background: rgba(19,19,26,0.9);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      padding: 8px 18px;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      backdrop-filter: blur(12px);
+      transition: opacity 0.3s;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    #status-bar.active { color: var(--accent); }
+    #status-bar.error { color: var(--danger); }
+
+    /* ── Hint ── */
+    #hint {
+      position: fixed;
+      bottom: 20px; right: 20px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      pointer-events: none;
+    }
+    .hint-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--muted);
+      font-family: 'Space Mono', monospace;
+    }
+    .hint-key {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 10px;
+      color: var(--text);
+    }
+
+    /* ── Progress ── */
+    #progress-wrap {
+      display: none;
+      margin-top: 10px;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    #progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      border-radius: 2px;
+      transition: width 0.3s ease;
+      animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer {
+      0% { filter: brightness(1); }
+      50% { filter: brightness(1.4); }
+      100% { filter: brightness(1); }
+    }
+
+    /* collapsed state */
+    #ui.collapsed #ui-body { display: none; }
+    #ui.collapsed { border-radius: 12px; }
+  </style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<!-- ══ UI Panel ══ -->
+<div id="ui">
+  <div id="ui-header" onclick="togglePanel()">
+    <div class="title-group">
+      <span class="label-mono">PlayCanvas · GSplat</span>
+      <h1>3D Gaussian Splat Viewer</h1>
+    </div>
+    <button id="toggle-btn" title="Összecsuk / Kinyit">▲</button>
+  </div>
+
+  <div id="ui-body">
+    <div class="field-group">
+      <label>.ply fájl URL-je</label>
+      <input type="text" id="ply-url"
+        placeholder="https://example.com/model.ply"
+        value="" />
+      <div id="progress-wrap"><div id="progress-bar"></div></div>
+    </div>
+
+    <div class="row">
+      <button id="load-btn" onclick="loadSplat()">▶ Betöltés</button>
+      <button id="reset-btn" onclick="resetCamera()" title="Kamera visszaállítása">⟳</button>
+    </div>
+
+    <div class="separator"></div>
+
+    <div class="field-group">
+      <label>Kamera sebesség</label>
+      <div class="slider-row">
+        <input type="range" id="speed-slider" min="0.1" max="5" step="0.1" value="1"
+          oninput="updateSpeed(this.value)" />
+        <span class="slider-val" id="speed-val">1.0</span>
+      </div>
+    </div>
+
+    <div class="field-group">
+      <label>Zoom érzékenység</label>
+      <div class="slider-row">
+        <input type="range" id="zoom-slider" min="0.1" max="5" step="0.1" value="1"
+          oninput="updateZoom(this.value)" />
+        <span class="slider-val" id="zoom-val">1.0</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Status ══ -->
+<div id="status-bar">Motor inicializálása…</div>
+
+<!-- ══ Hints ══ -->
+<div id="hint">
+  <div class="hint-item"><span class="hint-key">🖱 Húzás</span> Forgatás</div>
+  <div class="hint-item"><span class="hint-key">🖱 Jobb gomb</span> Mozgatás</div>
+  <div class="hint-item"><span class="hint-key">Scroll</span> Zoom</div>
+  <div class="hint-item"><span class="hint-key">👆 Két ujj</span> Zoom / Mozgatás</div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  1. KONFIGURÁCIÓ — IDE ÍRD BE AZ ALAPÉRTELMEZETT URL-T
+// ═══════════════════════════════════════════════════════
+const DEFAULT_PLY_URL = 'https://raw.githubusercontent.com/roomee-alt/Els-teszt/main/2026.%2005.%2027.ply';   // 
+
+// ═══════════════════════════════════════════════════════
+//  2. PlayCanvas alkalmazás inicializálása
+// ═══════════════════════════════════════════════════════
+const canvas = document.getElementById('canvas');
+const app = new pc.Application(canvas, {
+  mouse: new pc.Mouse(canvas),
+  touch: new pc.TouchDevice(canvas),
+  keyboard: new pc.Keyboard(window),
+  graphicsDeviceOptions: { antialias: true, alpha: false }
+});
+app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW);
+app.setCanvasResolution(pc.RESOLUTION_AUTO);
+app.start();
+
+// Háttérszín
+app.scene.ambientLight = new pc.Color(0.15, 0.15, 0.2);
+app.renderer.clearColor = new pc.Color(0.04, 0.04, 0.06, 1);
+
+// ═══════════════════════════════════════════════════════
+//  3. Kamera entitás
+// ═══════════════════════════════════════════════════════
+const cameraEntity = new pc.Entity('camera');
+cameraEntity.addComponent('camera', {
+  clearColor: new pc.Color(0.04, 0.04, 0.06),
+  fov: 60,
+  nearClip: 0.01,
+  farClip: 10000
+});
+app.root.addChild(cameraEntity);
+
+// ═══════════════════════════════════════════════════════
+//  4. Orbit Camera Script (egér + érintés)
+// ═══════════════════════════════════════════════════════
+let orbitState = {
+  yaw: 0, pitch: 30,
+  distance: 3,
+  target: new pc.Vec3(0, 0, 0),
+  rotateSpeed: 1,
+  zoomSpeed: 1,
+  panSpeed: 0.005,
+  minDist: 0.1, maxDist: 1000,
+  minPitch: -89, maxPitch: 89,
+  isDragging: false,
+  isPanning: false,
+  lastX: 0, lastY: 0,
+  touches: []
+};
+
+function applyOrbit() {
+  const { yaw, pitch, distance, target } = orbitState;
+  const yawRad   = yaw   * pc.math.DEG_TO_RAD;
+  const pitchRad = pitch * pc.math.DEG_TO_RAD;
+  const x = target.x + distance * Math.sin(yawRad) * Math.cos(pitchRad);
+  const y = target.y + distance * Math.sin(pitchRad);
+  const z = target.z + distance * Math.cos(yawRad) * Math.cos(pitchRad);
+  cameraEntity.setPosition(x, y, z);
+  cameraEntity.lookAt(target);
+}
+applyOrbit();
+
+// Mouse events
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button === 0) { orbitState.isDragging = true; }
+  if (e.button === 2) { orbitState.isPanning  = true; }
+  orbitState.lastX = e.clientX;
+  orbitState.lastY = e.clientY;
+});
+window.addEventListener('mouseup', () => {
+  orbitState.isDragging = false;
+  orbitState.isPanning  = false;
+});
+window.addEventListener('mousemove', (e) => {
+  const dx = e.clientX - orbitState.lastX;
+  const dy = e.clientY - orbitState.lastY;
+  orbitState.lastX = e.clientX;
+  orbitState.lastY = e.clientY;
+
+  if (orbitState.isDragging) {
+    orbitState.yaw   -= dx * 0.3 * orbitState.rotateSpeed;
+    orbitState.pitch  = pc.math.clamp(
+      orbitState.pitch + dy * 0.3 * orbitState.rotateSpeed,
+      orbitState.minPitch, orbitState.maxPitch
+    );
+    applyOrbit();
+  }
+  if (orbitState.isPanning) {
+    pan(dx, dy);
+  }
+});
+
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const factor = 1 + (e.deltaY > 0 ? 0.1 : -0.1) * orbitState.zoomSpeed;
+  orbitState.distance = pc.math.clamp(
+    orbitState.distance * factor, orbitState.minDist, orbitState.maxDist
+  );
+  applyOrbit();
+}, { passive: false });
+
+// Pan helper
+function pan(dx, dy) {
+  const cam = cameraEntity;
+  const right = cam.right.clone().scale(-dx * orbitState.panSpeed * orbitState.distance);
+  const up    = cam.up   .clone().scale( dy * orbitState.panSpeed * orbitState.distance);
+  orbitState.target.add(right).add(up);
+  applyOrbit();
+}
+
+// Touch events
+let lastTouchDist = 0;
+let lastTouchMid  = { x: 0, y: 0 };
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  orbitState.touches = Array.from(e.touches);
+  if (e.touches.length === 1) {
+    orbitState.lastX = e.touches[0].clientX;
+    orbitState.lastY = e.touches[0].clientY;
+    orbitState.isDragging = true;
+  }
+  if (e.touches.length === 2) {
+    orbitState.isDragging = false;
+    lastTouchDist = Math.hypot(
+      e.touches[1].clientX - e.touches[0].clientX,
+      e.touches[1].clientY - e.touches[0].clientY
+    );
+    lastTouchMid = {
+      x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+      y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+    };
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  orbitState.isDragging = false;
+  if (e.touches.length === 1) {
+    orbitState.lastX = e.touches[0].clientX;
+    orbitState.lastY = e.touches[0].clientY;
+    orbitState.isDragging = true;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 1 && orbitState.isDragging) {
+    const dx = e.touches[0].clientX - orbitState.lastX;
+    const dy = e.touches[0].clientY - orbitState.lastY;
+    orbitState.lastX = e.touches[0].clientX;
+    orbitState.lastY = e.touches[0].clientY;
+    orbitState.yaw   -= dx * 0.4 * orbitState.rotateSpeed;
+    orbitState.pitch  = pc.math.clamp(
+      orbitState.pitch + dy * 0.4 * orbitState.rotateSpeed,
+      orbitState.minPitch, orbitState.maxPitch
+    );
+    applyOrbit();
+  }
+  if (e.touches.length === 2) {
+    const dist = Math.hypot(
+      e.touches[1].clientX - e.touches[0].clientX,
+      e.touches[1].clientY - e.touches[0].clientY
+    );
+    const mid = {
+      x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+      y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+    };
+    // Zoom
+    const scale = lastTouchDist / (dist || 1);
+    orbitState.distance = pc.math.clamp(
+      orbitState.distance * scale, orbitState.minDist, orbitState.maxDist
+    );
+    // Pan
+    pan(mid.x - lastTouchMid.x, mid.y - lastTouchMid.y);
+
+    lastTouchDist = dist;
+    lastTouchMid  = mid;
+    applyOrbit();
+  }
+}, { passive: false });
+
+// ═══════════════════════════════════════════════════════
+//  5. Gaussian Splat betöltés
+// ═══════════════════════════════════════════════════════
+let splatEntity = null;
+
+function setStatus(msg, type = '') {
+  const el = document.getElementById('status-bar');
+  el.textContent = msg;
+  el.className = type;
+}
+
+function loadSplat() {
+  const url = document.getElementById('ply-url').value.trim() || DEFAULT_PLY_URL;
+  if (!url) {
+    setStatus('⚠ Adj meg egy .ply URL-t!', 'error');
+    return;
+  }
+
+  // Előző modell eltávolítása
+  if (splatEntity) {
+    splatEntity.destroy();
+    splatEntity = null;
+  }
+
+  setStatus('Betöltés…', 'active');
+  showProgress(true);
+
+  app.assets.loadFromUrl(url, 'gsplat', (err, asset) => {
+    showProgress(false);
+    if (err) {
+      setStatus('✕ Betöltési hiba: ' + err, 'error');
+      console.error(err);
+      return;
+    }
+
+    splatEntity = new pc.Entity('gsplat');
+    splatEntity.addComponent('gsplat', { asset });
+    app.root.addChild(splatEntity);
+
+    // Kamera automatikus pozicionálás az AABB alapján
+    const render = splatEntity.findComponent('gsplat');
+    setTimeout(() => fitCamera(), 300);
+
+    setStatus('✓ Modell betöltve · ' + url.split('/').pop());
+  });
+}
+
+function fitCamera() {
+  // Alapértelmezett nézet – a modell középpontjára néz
+  orbitState.target.set(0, 0, 0);
+  orbitState.distance = 3;
+  orbitState.yaw   = 0;
+  orbitState.pitch = 20;
+  applyOrbit();
+}
+
+function resetCamera() {
+  fitCamera();
+}
+
+function showProgress(show) {
+  document.getElementById('progress-wrap').style.display = show ? 'block' : 'none';
+  if (show) animateProgress();
+}
+
+let progressAnim = null;
+function animateProgress() {
+  const bar = document.getElementById('progress-bar');
+  let w = 0;
+  clearInterval(progressAnim);
+  progressAnim = setInterval(() => {
+    w = Math.min(w + Math.random() * 8, 90);
+    bar.style.width = w + '%';
+  }, 200);
+  // Teljesítéskor a loadSplat zárja
+  setTimeout(() => {
+    clearInterval(progressAnim);
+    bar.style.width = '100%';
+  }, 5000);
+}
+
+function updateSpeed(v) {
+  orbitState.rotateSpeed = parseFloat(v);
+  document.getElementById('speed-val').textContent = parseFloat(v).toFixed(1);
+}
+
+function updateZoom(v) {
+  orbitState.zoomSpeed = parseFloat(v);
+  document.getElementById('zoom-val').textContent = parseFloat(v).toFixed(1);
+}
+
+// Panel toggle
+function togglePanel() {
+  const ui = document.getElementById('ui');
+  const btn = document.getElementById('toggle-btn');
+  ui.classList.toggle('collapsed');
+  btn.textContent = ui.classList.contains('collapsed') ? '▼' : '▲';
+}
+
+// ═══════════════════════════════════════════════════════
+//  6. Indítás
+// ═══════════════════════════════════════════════════════
+window.addEventListener('resize', () => app.resizeCanvas());
+
+if (DEFAULT_PLY_URL) {
+  document.getElementById('ply-url').value = DEFAULT_PLY_URL;
+  setTimeout(loadSplat, 500);
+} else {
+  setStatus('Adj meg egy .ply URL-t, majd kattints a Betöltésre');
+}
+</script>
+</body>
+</html>
